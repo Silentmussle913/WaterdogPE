@@ -9,7 +9,11 @@ import io.netty.channel.ChannelPromise;
 import io.netty.util.internal.PlatformDependent;
 import lombok.extern.log4j.Log4j2;
 import org.cloudburstmc.protocol.bedrock.netty.BedrockBatchWrapper;
+import org.cloudburstmc.protocol.bedrock.netty.BedrockPacketWrapper;
+import org.cloudburstmc.protocol.bedrock.packet.LevelChunkPacket;
+import org.cloudburstmc.protocol.bedrock.packet.NetworkChunkPublisherUpdatePacket;
 
+import java.util.ListIterator;
 import java.util.Queue;
 
 @Log4j2
@@ -42,6 +46,11 @@ public class PacketQueueHandler extends ChannelDuplexHandler {
         BedrockBatchWrapper batch;
         while ((batch = this.queue.poll()) != null) {
             if (send) {
+                this.dropChunkPackets(batch);
+                if (batch.getPackets().isEmpty()) {
+                    batch.release();
+                    continue;
+                }
                 ctx.write(batch);
             } else {
                 batch.release();
@@ -80,6 +89,19 @@ public class PacketQueueHandler extends ChannelDuplexHandler {
             NetworkMetrics metrics = ctx.channel().attr(NetworkMetrics.ATTRIBUTE).get();
             if (metrics != null) {
                 metrics.packetQueueTooLarge();
+            }
+        }
+    }
+
+    private void dropChunkPackets(BedrockBatchWrapper batch) {
+        ListIterator<BedrockPacketWrapper> iterator = batch.getPackets().listIterator();
+        while (iterator.hasNext()) {
+            BedrockPacketWrapper wrapper = iterator.next();
+            if (wrapper.getPacket() instanceof LevelChunkPacket ||
+                    wrapper.getPacket() instanceof NetworkChunkPublisherUpdatePacket) {
+                iterator.remove();
+                wrapper.release();
+                batch.modify();
             }
         }
     }
